@@ -178,6 +178,21 @@ export interface ClaudeAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
 
+/**
+ * Resolve a UI model slug to the actual model name for the API.
+ * When a custom API proxy is configured (via ANTHROPIC_BASE_URL), the proxy may
+ * require specific model names that differ from the canonical UI slugs.
+ * This checks ANTHROPIC_DEFAULT_*_MODEL env vars for overrides.
+ */
+function resolveModelFromEnv(model: string): string {
+  const MODEL_ENV_MAP: Record<string, string | undefined> = {
+    "claude-opus-4-6": process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+    "claude-sonnet-4-6": process.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+    "claude-haiku-4-5": process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+  };
+  return MODEL_ENV_MAP[model] ?? model;
+}
+
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -2564,9 +2579,12 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           ...(fastMode ? { fastMode: true } : {}),
         };
 
+        // Resolve model name from env var overrides (e.g. for custom API proxies)
+        const resolvedModel = input.model ? resolveModelFromEnv(input.model) : undefined;
+
         const queryOptions: ClaudeQueryOptions = {
           ...(input.cwd ? { cwd: input.cwd } : {}),
-          ...(input.model ? { model: input.model } : {}),
+          ...(resolvedModel ? { model: resolvedModel } : {}),
           pathToClaudeCodeExecutable: providerOptions?.binaryPath ?? "claude",
           settingSources: [...CLAUDE_SETTING_SOURCES],
           ...(effectiveEffort ? { effort: effectiveEffort } : {}),
@@ -2715,8 +2733,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
 
         if (input.model) {
+          const resolvedSwitchModel = resolveModelFromEnv(input.model);
           yield* Effect.tryPromise({
-            try: () => context.query.setModel(input.model),
+            try: () => context.query.setModel(resolvedSwitchModel),
             catch: (cause) => toRequestError(input.threadId, "turn/setModel", cause),
           });
         }
